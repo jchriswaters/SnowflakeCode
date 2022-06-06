@@ -1,0 +1,131 @@
+create or replace table base_second as (
+select
+    n-1 second_index,
+    to_time(to_char(n-1)) tm,
+    trunc((n - 1) / 2) s2,
+    trunc((n - 1) / 4) s4,
+    trunc((n - 1) / 5) s5,
+    trunc((n - 1) / 10) s10,
+    trunc((n - 1) / 20) s20,
+    trunc((n - 1) / 30) s30,
+    trunc((n - 1) / 60) m1,
+    trunc((n - 1) / (2 * 60)) m2,
+    trunc((n - 1) / (5 * 60)) m5,
+    trunc((n - 1) / (10 * 60)) m10,
+    trunc((n - 1) / (20 * 60)) m20,
+    trunc((n - 1) / (30 * 60)) m30,
+    trunc((n - 1) / (1 * 60 * 60)) h1,
+    trunc((n - 1) / (2 * 60 * 60)) h2,
+    trunc((n - 1) / (3 * 60 * 60)) h3,
+    trunc((n - 1) / (4 * 60 * 60)) h4,
+    trunc((n - 1) / (6 * 60 * 60)) h6,
+    trunc((n - 1) / (12 * 60 * 60)) h12,
+    0 s1m,
+    iff(mod(n-1, 2) = 0, 0, 1) s2m,
+    iff(mod(n-1, 4) = 0, 0, 1) s4m,
+    iff(mod(n-1, 5) = 0, 0, 1) s5m,
+    iff(mod(n-1, 10) = 0, 0, 1) s10m,
+    iff(mod(n-1, 20) = 0, 0, 1) s20m,
+    iff(mod(n-1, 30) = 0, 0, 1) s30m,
+    iff(mod(n-1, 60) = 0, 0, 1) m1m,
+    iff(mod(n-1, 120) = 0, 0, 1) m2m,
+    iff(mod(n-1, 300) = 0, 0, 1) m5m,
+    iff(mod(n-1, 600) = 0, 0, 1) m10m,
+    iff(mod(n-1, 1200) = 0, 0, 1) m20m,
+    iff(mod(n-1, 1800) = 0, 0, 1) m30m,
+    iff(mod(n-1, 3600) = 0, 0, 1) h1m,
+    iff(mod(n-1, 7200) = 0, 0, 1) h2m,
+    iff(mod(n-1, 10800) = 0, 0, 1) h3m,
+    iff(mod(n-1, 14400) = 0, 0, 1) h4m,
+    iff(mod(n-1, 21600) = 0, 0, 1) h6m,
+    iff(mod(n-1, 43200) = 0, 0, 1) h12m,
+    iff(mod(n-1, 86400) = 0, 0, 1) d1m
+from
+    (select row_number() over (order by seq4()) n from table(generator(rowcount => 86400)))
+);
+
+create table base_millisecond as (
+select
+    n-1 ms_index,
+    trunc((n - 1) / 2) ms2,
+    trunc((n - 1) / 4) ms4,
+    trunc((n - 1) / 5) ms5,
+    trunc((n - 1) / 6) ms6,
+    trunc((n - 1) / 8) ms8,
+    trunc((n - 1) / 10) ms10,
+    trunc((n - 1) / 20) ms20,
+    trunc((n - 1) / 30) ms30,
+    trunc((n - 1) / 40) ms40,
+    trunc((n - 1) / 50) ms50,
+    trunc((n - 1) / 100) ms100,
+    trunc((n - 1) / 200) ms200,
+    trunc((n - 1) / 300) ms300,
+    trunc((n - 1) / 400) ms400,
+    trunc((n - 1) / 500) ms500
+from
+    (select row_number() over (order by seq4()) n from table(generator(rowcount => 1000)))
+);
+
+create table base_day as (
+select
+    n day_index,
+    dateadd(day, n-1, to_date('1/1/1900', 'MM/DD/YYYY')) date_value,
+    dayname(date_value) day_name,
+    last_day(date_value) month_end,
+    year(date_value) year,
+    month(date_value) year_month,
+    week(date_value) year_week,
+    day(date_value) year_day,
+    dayofmonth(month_end) days_in_month,
+    dayofweek(date_value) day_of_week_sun,
+    dayofweek(dateadd(day, 2, date_value)) day_of_week_fri,
+    dayofweek(dateadd(day, 3, date_value)) day_of_week_thu,
+    decode(day_of_week_sun, 0, date_value, dateadd(day, 7 - day_of_week_sun, date_value)) week_end_sun,
+    decode(day_of_week_fri, 0, date_value, dateadd(day, 7 - day_of_week_fri, date_value)) week_end_fri,
+    decode(day_of_week_thu, 0, date_value, dateadd(day, 7 - day_of_week_thu, date_value)) week_end_thu
+from
+    (select row_number() over (order by seq4()) n from table(generator(rowcount => 100000)))
+)
+;
+
+create or replace TABLE EQ (
+	EQ_UID NUMBER(10,0),
+	EQ_NAME VARCHAR(100),
+	DSCR VARCHAR(1000)
+);
+
+create or replace TABLE EQ_TAG (
+	EQ_UID NUMBER(10,0),
+	TAG_UID NUMBER(10,0),
+	ATTR_NAME VARCHAR(100)
+);
+
+create or replace TABLE TAG (
+	TAG_UID NUMBER(10,0) NOT NULL,
+	TAGNAME VARCHAR(100),
+	DSCR VARCHAR(1000),
+	primary key (TAG_UID)
+);
+
+create or replace TABLE TAG_EVENT (
+	EVENT_UID NUMBER(10,0),
+	EVENT_TYPE_UID NUMBER(10,0),
+	TAG_UID NUMBER(10,0),
+	START_TS TIMESTAMP_NTZ(9),
+	END_TS TIMESTAMP_NTZ(9)
+);
+
+create or replace TABLE TAG_GROUP (
+	GROUP_NAME VARCHAR(100),
+	TAG_UID NUMBER(10,0)
+);
+
+create or replace TABLE TAG_VALUE (
+	TAG_UID NUMBER(10,0),
+	D DATE,
+	TS TIMESTAMP_NTZ(9),
+	VAL NUMBER(38,12),
+	DAY_INDEX NUMBER(10,0),
+	SECOND_INDEX NUMBER(7,0),
+	MS_INDEX NUMBER(4,0)
+);
