@@ -1,5 +1,113 @@
 
 
+CREATE OR REPLACE FUNCTION DBTL.TIME_SERIES.TAG_VALUE_NEXT_INTERPOLATE("V_STARTTIME" TIMESTAMP_NTZ(9), "V_ENDTIME" TIMESTAMP_NTZ(9), "V_TAGLIST" VARCHAR(16777216), "V_SAMPLERATE" VARCHAR(10))
+RETURNS TABLE ("TS" TIMESTAMP_NTZ(9), "TAG_UID" NUMBER(38,0), "VAL" NUMBER(38,12))
+LANGUAGE SQL
+AS '
+-------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------
+-- Chris Waters
+-- Updated 2022 11 25
+-- Function generates next value interpolation of raw signal values stored in 
+-- TAG_VALUE table.  Raw values can be stored at any sample rate although
+-- interpolation is done only to 1 second minimmum granularity
+--
+-- v_TagList is a comma delimited varchar listing of all required tag_uids
+-- v_SampleRate is a varchar that qualifies the interval between interpolated
+--      values.  It can be set to S1 (one second), S2, S4, S5, S10, S20, S30
+--      M1 (one minute), M2, M5, M10, M20, M30, H1, H2, H3, H4, H6, H12, D1 (one day)
+--
+-- if vStartTime occurs before values are present in the raw table (tag_value)
+-- or vEndTime occurs after values are present,
+-- the function returns null records until the first available value and null records
+-- after the last available value.
+-------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------
+    -- creates a table of signal UIDs ("tag" uids in historian speak) from the input parameter
+with taglist as 
+    (select to_number(trim(value))tag_uid from table(split_to_table(v_TagList,'',''))),
+    -- sets the start time for gathering raw tag data as the earliest row for all of the tags
+    -- in the parameter list which have data before (or equal to) the StartTime parameter
+    -- This ensures that we have values to interpolate from if there is no value in the raw
+    -- table at the StartTime requested (for each tag)    
+    mn as ( -- get latest "before" timestamp for each tag
+    select nvl(min(ts), v_StartTime) ts from (
+        select tag_uid, max(ts) ts from tag_value  -- gets the earliest tag times for each tag
+        where tag_uid in (select tag_uid from taglist)  
+        and d between dateadd(''day'', -30, v_StartTime) and v_StartTime
+        and ts <= v_StartTime
+        group by tag_uid)),
+    -- gets all of the raw tag values over period including earlier and later than specified
+    -- to enable interpolation at start and end
+    vals as
+    (select 
+          tv.tag_uid,
+          tv.ts,
+          tv.d,
+          tv.second_index,
+          tv.ms_index,
+          avg(tv.val) val -- averaging may not be necessary if source data does not have duplicates
+      from 
+          tag_value tv
+      where  
+          tv.d between dateadd(day, -30, v_StartTime) and dateadd(day, 30, v_EndTime) -- limit improves pruning
+          -- will have issues of course if there is no prior value within 30 days of requested data
+          and tv.ts between (select ts from mn) and v_EndTime
+      group by tv.tag_uid,
+          tv.ts,
+          tv.d,
+          tv.second_index,
+          tv.ms_index),
+    -- generate the set of rows at over the required range and sample rate for each tag
+    -- the base_second table contains standard aggregation markers to select from the 86400
+    -- possible values per day.  Note this function does not interpolate at the millisecond level          
+    tag_times as(
+      select
+        t.tag_uid,
+        d.day_index,
+        d.date_value,
+        s.second_index,
+        timestampadd(second, s.second_index, d.date_value) ts,
+        1 include
+      from
+          base_day d,
+          base_second s,
+          taglist t
+      where
+          d.date_value between date_trunc(day, v_StartTime) and date_trunc(day, dateadd(day, 1, v_EndTime))
+          and timestampadd(''second'', s.second_index, d.date_value) between v_StartTime and v_EndTime
+          and decode(v_SampleRate, ''S1'', s.s1m, ''S2'', s.s2m, ''S4'', s.s4m, ''S5'', s.s5m, ''S10'', s.s10m, ''S20'', s.s20m, ''S30'', s.s30m, 
+                     ''M1'', s.m1m, ''M2'', s.m2m, ''M5'', s.m5m, ''M10'', s.m10m, ''M20'', s.m20m, ''M30'', s.m30m, 
+                     ''H1'', s.h1m, ''H2'', s.h2m, ''H3'', s.h3m, ''H4'', s.h4m, ''H6'', s.h6m, ''H12'', s.h12m, s.d1m ) = 0),
+    -- a full outer join containing both the generated tag\\time rows unioned with 
+    -- the raw values over the required time range                     
+    tag_times_values as (
+      select
+          nvl(i.ts, r.ts) ts,
+          nvl(i.tag_uid, r.tag_uid) tag_uid,
+          r.val rawval,
+          i.include
+      from
+          vals r full outer join tag_times i on i.tag_uid = r.tag_uid and i.date_value = r.d and i.ts = r.ts
+    ),
+    interp as (
+      select 
+      ts,
+      tag_uid,
+      rawval,
+      first_value(rawval ignore nulls) over (partition by tag_uid order by ts rows between current row and unbounded following) as ival,
+      include
+    from tag_times_values
+    )
+select 
+  ts,
+  tag_uid,
+  ival val
+from interp 
+where include = 1
+order by tag_uid, ts 
+';
+
 CREATE OR REPLACE FUNCTION TAG_VALUE_LAST_INTERPOLATE(V_STARTTIME TIMESTAMP_NTZ(9), V_ENDTIME TIMESTAMP_NTZ(9), V_TAGLIST VARCHAR(16777216), V_SAMPLERATE VARCHAR(10))
 -------------------------------------------------------------------------------------
 -------------------------------------------------------------------------------------
